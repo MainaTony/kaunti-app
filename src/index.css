@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+/* Tailwind v4 defaults border colour to currentColor; restore the v3 grey for any bare border classes. */
+@layer base {
+  *, ::before, ::after { border-color: rgba(255, 255, 255, 0.1); }
+  html { -webkit-tap-highlight-color: transparent; }
+  body { overscroll-behavior: none; }
+}
