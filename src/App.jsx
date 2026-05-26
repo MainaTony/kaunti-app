@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Volume2, VolumeX, Flame, RotateCcw, Play, Crown, Construction, Award, Lock } from 'lucide-react';
+import { Volume2, VolumeX, Flame, RotateCcw, Play, Crown, Award } from 'lucide-react';
 
 // ════════════════════════════════════════════════════════════════════════════
 // DATA — 47 Kenya counties, real geographic boundaries.
@@ -64,14 +64,7 @@ const COUNTIES = [
 // and providing a corresponding `runner` (left out of v1).
 // ════════════════════════════════════════════════════════════════════════════
 const GAME_MODES = [
-  { id: 'counties_mcq', name: 'Counties',       subtitle: 'Multiple choice',  enabled: true  },
-  { id: 'counties_tap', name: 'Tap the County', subtitle: 'Pick the hex',     enabled: false },
-  { id: 'counties_typ', name: 'Type the Name',  subtitle: 'Spell it out',     enabled: false },
-  { id: 'rivers',       name: 'Rivers',         subtitle: 'Tana, Athi…',      enabled: false },
-  { id: 'lakes',        name: 'Lakes',          subtitle: 'Naivasha, Turkana',enabled: false },
-  { id: 'mountains',    name: 'Mountains',      subtitle: 'Peaks of Kenya',   enabled: false },
-  { id: 'parks',        name: 'National Parks', subtitle: 'Maasai Mara…',     enabled: false },
-  { id: 'multiplayer',  name: 'Multiplayer',    subtitle: 'Race friends live',enabled: false },
+  { id: 'counties_mcq', name: 'Counties', subtitle: 'Multiple choice', enabled: true },
 ];
 
 const TOTAL_QUESTIONS = 15;
@@ -624,35 +617,6 @@ function StartScreen({ onStart, soundEnabled, setSoundEnabled }) {
           <Play className="w-6 h-6 fill-current" /> Start Quiz
         </span>
       </button>
-
-      <div className="mt-12 w-full max-w-2xl kt-up" style={{ animationDelay: '0.3s' }}>
-        <div className="flex items-center gap-3 mb-4">
-          <span className="text-[10px] font-mono uppercase tracking-[0.25em] text-slate-400">Game Modes</span>
-          <span className="flex-1 h-px bg-slate-200" />
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          {GAME_MODES.map((mode) => (
-            <button key={mode.id} disabled={!mode.enabled}
-              onClick={() => mode.enabled && onStart()}
-              className={`relative text-left p-4 rounded-2xl border transition group ${
-                mode.enabled
-                  ? 'bg-white border-indigo-200 hover:border-indigo-400 shadow-sm hover:shadow-md cursor-pointer'
-                  : 'bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed'
-              }`}>
-              <div className="font-display font-bold text-sm leading-tight mb-1 text-slate-800">{mode.name}</div>
-              <div className="text-[10px] text-slate-400">{mode.subtitle}</div>
-              {!mode.enabled && (
-                <Lock className="absolute top-3 right-3 w-3 h-3 text-slate-300" />
-              )}
-              {mode.enabled && (
-                <div className="absolute top-3 right-3 text-[8px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-indigo-500 text-white">
-                  NOW
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
 
       <div className="mt-10 text-[10px] text-slate-400 text-center font-mono tracking-wider">
         v1.0 · {TOTAL_QUESTIONS} questions per round · made for Kenya
