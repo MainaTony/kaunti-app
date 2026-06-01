@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Volume2, VolumeX, Flame, RotateCcw, Play, Crown, Award } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Volume2, VolumeX, Flame, RotateCcw, Play, Crown, Award, Pencil } from 'lucide-react';
+import { supabase } from './supabase';
 
 // ════════════════════════════════════════════════════════════════════════════
 // DATA — 47 Kenya counties, real geographic boundaries.
@@ -73,6 +74,59 @@ const PRAISE = ['Sharp!', 'Excellent!', 'County Master!', 'Unstoppable!', 'Brill
 const ENCOURAGE = ['Almost!', 'Good try!', "You'll get the next one!", 'So close!', 'Keep going!', 'Shake it off!', 'Next one is yours!'];
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// ════════════════════════════════════════════════════════════════════════════
+// PLAYER IDENTITY & PERSISTENCE
+// ════════════════════════════════════════════════════════════════════════════
+const getOrCreatePlayerId = () => {
+  let id = localStorage.getItem('kaunti_player_id');
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem('kaunti_player_id', id); }
+  return id;
+};
+
+const loadPersonalStats = () => ({
+  bestScore:   parseInt(localStorage.getItem('kaunti_best_score')   || '0', 10),
+  bestStreak:  parseInt(localStorage.getItem('kaunti_best_streak')  || '0', 10),
+  gamesPlayed: parseInt(localStorage.getItem('kaunti_games_played') || '0', 10),
+});
+
+const savePersonalStats = ({ bestScore, bestStreak, gamesPlayed }) => {
+  localStorage.setItem('kaunti_best_score',   String(bestScore));
+  localStorage.setItem('kaunti_best_streak',  String(bestStreak));
+  localStorage.setItem('kaunti_games_played', String(gamesPlayed));
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// SUPABASE SUBMISSION
+// ════════════════════════════════════════════════════════════════════════════
+const submitScoreToSupabase = ({ playerId, username, score, bestStreak, accuracy }) =>
+  supabase.from('scores')
+    .insert([{ player_id: playerId, username, score, best_streak: bestStreak, accuracy }])
+    .then(({ error }) => { if (error) throw error; });
+
+// ════════════════════════════════════════════════════════════════════════════
+// USERNAME VALIDATION
+// ════════════════════════════════════════════════════════════════════════════
+const USERNAME_RE = /^[a-zA-Z0-9 '\-]{2,20}$/;
+const validateUsername = (raw) => {
+  const v = raw.trim();
+  if (v.length < 2)         return 'Too short — minimum 2 characters.';
+  if (v.length > 20)        return 'Too long — maximum 20 characters.';
+  if (!USERNAME_RE.test(v)) return "2–20 characters. Letters, numbers, spaces, apostrophes, and hyphens only.";
+  return null;
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// TIME AGO
+// ════════════════════════════════════════════════════════════════════════════
+const timeAgo = (dateStr) => {
+  const m = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+};
 
 // ════════════════════════════════════════════════════════════════════════════
 // AUDIO — synthesized via Web Audio API (no external files)
@@ -366,10 +420,62 @@ export default function App() {
   const [confettiKey, setConfettiKey] = useState(0);
   const [pointsPopup, setPointsPopup] = useState(null);
 
+  // Player identity
+  const [playerId, setPlayerId]                   = useState('');
+  const [username, setUsername]                   = useState('');
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
+  // Personal stats (mirrored from localStorage)
+  const [personalStats, setPersonalStats]         = useState({ bestScore: 0, bestStreak: 0, gamesPlayed: 0 });
+  // Score submission status for the end screen
+  const [scoreSubmitStatus, setScoreSubmitStatus] = useState(null); // null | 'failed'
+  // Leaderboard
+  const [leaderboard, setLeaderboard]             = useState([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError]   = useState(null);
+  const [playerRank, setPlayerRank]               = useState(undefined); // undefined=loading, null=unranked, number
+
   const recentRef = useRef([]);
   const timerRef = useRef(null);
 
   useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  // Initialise player identity and personal stats on first mount
+  useEffect(() => {
+    const id   = getOrCreatePlayerId();
+    const name = localStorage.getItem('kaunti_username') || '';
+    setPlayerId(id);
+    setUsername(name);
+    setPersonalStats(loadPersonalStats());
+    if (!name.trim()) setShowUsernameModal(true);
+  }, []);
+
+  // Leaderboard fetch — deduped per player via get_top_players RPC
+  const fetchLeaderboard = useCallback(async () => {
+    if (!playerId) return;
+    setLeaderboardLoading(true);
+    setLeaderboardError(null);
+    setPlayerRank(undefined);
+    try {
+      const [{ data: rows, error: lbErr }, { data: rank, error: rankErr }] = await Promise.all([
+        supabase.rpc('get_top_players', { p_limit: 50 }),
+        supabase.rpc('get_player_rank', { p_player_id: playerId }),
+      ]);
+      if (lbErr) throw lbErr;
+      setLeaderboard(rows || []);
+      // Guard: gamesPlayed===0 means no successful submissions; the SQL function
+      // returns 1 incorrectly in that case (NULL comparison), so suppress it.
+      const stats = loadPersonalStats();
+      setPlayerRank(rankErr || stats.gamesPlayed === 0 ? null : rank);
+    } catch (err) {
+      setLeaderboardError(String(err?.message ?? err));
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  }, [playerId]);
+
+  useEffect(() => {
+    if (screen === 'leaderboard') fetchLeaderboard();
+  }, [screen, fetchLeaderboard]);
 
   const pickQuestion = useCallback(() => {
     const available = COUNTIES.filter(c => !recentRef.current.includes(c.name));
@@ -420,14 +526,19 @@ export default function App() {
     if (!selected || status !== 'asking' || !target) return;
     const isCorrect = selected === target.name;
 
+    // Compute all next values explicitly so the timeout closure captures them correctly.
+    // Safe because submitAnswer is disabled (status !== 'asking') during the feedback window.
+    const newStreak   = isCorrect ? streak + 1 : 0;
+    const pts         = isCorrect ? 100 + Math.max(0, newStreak - 1) * 25 : 0;
+    const nextScore   = score + pts;
+    const nextCorrect = isCorrect ? correctCount + 1 : correctCount;
+    const nextBest    = Math.max(bestStreak, newStreak);
+
     if (isCorrect) {
-      const newStreak = streak + 1;
-      const bonus = Math.max(0, newStreak - 1) * 25;
-      const pts = 100 + bonus;
-      setScore(s => s + pts);
+      setScore(nextScore);
       setStreak(newStreak);
-      setBestStreak(b => Math.max(b, newStreak));
-      setCorrectCount(c => c + 1);
+      setBestStreak(nextBest);
+      setCorrectCount(nextCorrect);
       setStatus('correct');
       setFeedbackMsg(pick(PRAISE));
       setConfettiKey(k => k + 1);
@@ -447,13 +558,29 @@ export default function App() {
       const next = questionIdx + 1;
       if (next >= TOTAL_QUESTIONS) {
         safePlay('win');
+        const accuracy = Math.round((nextCorrect / TOTAL_QUESTIONS) * 100);
+        const prev    = loadPersonalStats();
+        const updated = {
+          bestScore:   Math.max(prev.bestScore, nextScore),
+          bestStreak:  Math.max(prev.bestStreak, nextBest),
+          gamesPlayed: prev.gamesPlayed + 1,
+        };
+        savePersonalStats(updated);
+        setPersonalStats(updated);
+        setScoreSubmitStatus(null);
         setScreen('end');
+        submitScoreToSupabase({ playerId, username, score: nextScore, bestStreak: nextBest, accuracy })
+          .catch(err => {
+            console.warn('[KAUNTI] Score not saved:', err);
+            setScoreSubmitStatus('failed');
+          });
       } else {
         setQuestionIdx(next);
         pickQuestion();
       }
     }, isCorrect ? 1400 : 2100);
-  }, [selected, status, target, streak, questionIdx, pickQuestion, safePlay]);
+  }, [selected, status, target, streak, score, correctCount, bestStreak,
+      questionIdx, pickQuestion, safePlay, playerId, username]);
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden font-body select-none" style={{
@@ -528,11 +655,27 @@ export default function App() {
         .kt-bump { animation: kt-bump 0.4s ease-out; }
       `}</style>
 
+      {/* Username capture modal — renders over any screen until a name is saved */}
+      {showUsernameModal && (
+        <UsernameModal
+          initial={username}
+          onSave={(name) => {
+            localStorage.setItem('kaunti_username', name);
+            setUsername(name);
+            setShowUsernameModal(false);
+          }}
+        />
+      )}
+
       {screen === 'start' && (
         <StartScreen
           onStart={() => { safePlay('tick'); startGame(); }}
           soundEnabled={soundEnabled}
           setSoundEnabled={setSoundEnabled}
+          username={username}
+          personalStats={personalStats}
+          onEditUsername={() => setShowUsernameModal(true)}
+          onLeaderboard={() => setScreen('leaderboard')}
         />
       )}
 
@@ -565,6 +708,21 @@ export default function App() {
           history={history}
           onRestart={() => { safePlay('tick'); startGame(); }}
           onHome={() => setScreen('start')}
+          onLeaderboard={() => setScreen('leaderboard')}
+          scoreSubmitStatus={scoreSubmitStatus}
+        />
+      )}
+
+      {screen === 'leaderboard' && (
+        <LeaderboardScreen
+          playerId={playerId}
+          onBack={() => setScreen('start')}
+          onPlay={() => { safePlay('tick'); startGame(); }}
+          onRetry={fetchLeaderboard}
+          leaderboard={leaderboard}
+          loading={leaderboardLoading}
+          error={leaderboardError}
+          playerRank={playerRank}
         />
       )}
     </div>
@@ -574,7 +732,7 @@ export default function App() {
 // ════════════════════════════════════════════════════════════════════════════
 // START SCREEN
 // ════════════════════════════════════════════════════════════════════════════
-function StartScreen({ onStart, soundEnabled, setSoundEnabled }) {
+function StartScreen({ onStart, soundEnabled, setSoundEnabled, username, personalStats, onEditUsername, onLeaderboard }) {
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center px-4 py-8 max-w-2xl mx-auto">
       <div className="absolute top-4 right-4">
@@ -616,6 +774,30 @@ function StartScreen({ onStart, soundEnabled, setSoundEnabled }) {
         <span className="relative z-10 flex items-center gap-3">
           <Play className="w-6 h-6 fill-current" /> Start Quiz
         </span>
+      </button>
+
+      {/* Player identity + personal stats */}
+      <div className="mt-8 w-full max-w-sm kt-up" style={{ animationDelay: '0.25s' }}>
+        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 shadow-sm mb-3">
+          <span className="text-xs text-slate-400 font-body shrink-0">Playing as</span>
+          <span className="font-display font-bold text-slate-800 text-sm truncate flex-1">{username}</span>
+          <button onClick={onEditUsername} className="shrink-0 text-slate-400 hover:text-indigo-500 transition p-0.5 rounded" aria-label="Edit username">
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        {personalStats.gamesPlayed > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <MiniStat label="Best score"   value={personalStats.bestScore.toLocaleString()} color="#6366F1" />
+            <MiniStat label="Best streak"  value={personalStats.bestStreak}                 color="#F43F5E" />
+            <MiniStat label="Games played" value={personalStats.gamesPlayed}                color="#10B981" />
+          </div>
+        )}
+      </div>
+
+      <button onClick={onLeaderboard}
+        className="mt-3 flex items-center gap-2 px-5 py-2.5 rounded-xl font-display font-semibold text-sm bg-white border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-indigo-200 text-slate-600 hover:text-indigo-600 transition kt-up"
+        style={{ animationDelay: '0.35s' }}>
+        <Award className="w-4 h-4" /> Leaderboard
       </button>
 
       <div className="mt-10 text-[10px] text-slate-400 text-center font-mono tracking-wider">
@@ -762,7 +944,7 @@ function GameScreen({
 // ════════════════════════════════════════════════════════════════════════════
 // END SCREEN
 // ════════════════════════════════════════════════════════════════════════════
-function EndScreen({ score, bestStreak, correctCount, total, history, onRestart, onHome }) {
+function EndScreen({ score, bestStreak, correctCount, total, history, onRestart, onHome, onLeaderboard, scoreSubmitStatus }) {
   const accuracy = Math.round((correctCount / total) * 100);
   const grade =
     accuracy >= 90 ? { t: 'County Master',   c: '#fbbf24', sub: 'You know Kenya like home.' } :
@@ -789,6 +971,12 @@ function EndScreen({ score, bestStreak, correctCount, total, history, onRestart,
           <StatCard label="Best Streak" value={bestStreak}             color="#fb923c" />
         </div>
 
+        {scoreSubmitStatus === 'failed' && (
+          <div className="mb-4 text-center text-xs text-rose-400 font-mono">
+            Score not saved — offline?
+          </div>
+        )}
+
         {/* Round recap */}
         <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
@@ -809,32 +997,10 @@ function EndScreen({ score, bestStreak, correctCount, total, history, onRestart,
           </div>
         </div>
 
-        {/* Leaderboard placeholder */}
-        <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-4 mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <Award className="w-4 h-4 text-slate-400" />
-            <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-slate-500">Global Leaderboard</div>
-            <span className="ml-auto text-[9px] font-mono text-indigo-500 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100">
-              SOON
-            </span>
-          </div>
-          <div className="space-y-1.5 mt-3">
-            {[
-              { rank: 1, name: '—', score: '———' },
-              { rank: 2, name: '—', score: '———' },
-              { rank: 3, name: '—', score: '———' },
-            ].map(r => (
-              <div key={r.rank} className="flex items-center gap-3 text-xs text-slate-300 font-mono">
-                <span className="w-4 text-right">{r.rank}.</span>
-                <span className="flex-1">{r.name}</span>
-                <span>{r.score}</span>
-              </div>
-            ))}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-3 leading-relaxed">
-            Sign in to compete with players across the country.
-          </div>
-        </div>
+        <button onClick={onLeaderboard}
+          className="w-full mb-3 flex items-center justify-center gap-2 py-3 rounded-2xl font-display font-semibold text-sm bg-white border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-indigo-200 text-slate-600 hover:text-indigo-600 transition">
+          <Award className="w-4 h-4" /> View Leaderboard
+        </button>
 
         <div className="flex gap-2.5">
           <button onClick={onHome}
@@ -863,6 +1029,175 @@ function StatCard({ label, value, color }) {
     <div className="rounded-2xl bg-white border border-slate-100 shadow-sm px-3 py-4 text-center kt-pop">
       <div className="font-display font-extrabold leading-none" style={{ color, fontSize: 'clamp(1.5rem, 5vw, 2.25rem)' }}>{value}</div>
       <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-slate-400 mt-2">{label}</div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MINI STAT (start screen tiles)
+// ════════════════════════════════════════════════════════════════════════════
+function MiniStat({ label, value, color }) {
+  return (
+    <div className="rounded-xl bg-white border border-slate-100 shadow-sm px-2 py-3 text-center">
+      <div className="font-display font-extrabold text-lg leading-none" style={{ color }}>{value}</div>
+      <div className="text-[9px] font-mono uppercase tracking-[0.15em] text-slate-400 mt-1.5 leading-tight">{label}</div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// USERNAME MODAL
+// ════════════════════════════════════════════════════════════════════════════
+function UsernameModal({ initial, onSave }) {
+  const [value, setValue] = React.useState(initial || '');
+  const [error, setError]  = React.useState(null);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const err = validateUsername(value);
+    if (err) { setError(err); return; }
+    onSave(value.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4">
+      <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6 border border-slate-100">
+        <h2 className="font-display font-extrabold text-2xl text-slate-900 mb-1">What's your name?</h2>
+        <p className="text-sm text-slate-500 mb-6">
+          Your name appears on the leaderboard.
+        </p>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="text"
+            value={value}
+            onChange={e => { setValue(e.target.value); setError(null); }}
+            placeholder="e.g. Mwangi, Wanjiku…"
+            maxLength={20}
+            autoFocus
+            className="w-full px-4 py-3.5 rounded-2xl border bg-slate-50 font-body text-slate-900 text-base outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 transition mb-1"
+            style={{ borderColor: error ? '#F43F5E' : '#E2E8F0' }}
+          />
+          {error && <p className="text-xs text-rose-500 mt-1.5 mb-3 font-body">{error}</p>}
+          <button type="submit"
+            className="w-full mt-4 py-3.5 rounded-2xl font-display font-extrabold text-base tracking-wide transition hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              background: 'linear-gradient(135deg, #818CF8, #6366F1)',
+              color: '#FFFFFF',
+              boxShadow: '0 14px 36px -10px rgba(99, 102, 241, 0.45)',
+            }}>
+            Let's go →
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// LEADERBOARD SCREEN
+// ════════════════════════════════════════════════════════════════════════════
+function LeaderboardScreen({ playerId, onBack, onPlay, onRetry, leaderboard, loading, error, playerRank }) {
+  const medalColor = (rank) => rank === 1 ? '#FBBF24' : rank === 2 ? '#94A3B8' : rank === 3 ? '#FB923C' : null;
+
+  return (
+    <div className="relative min-h-screen flex flex-col px-4 pt-6 pb-8 max-w-2xl mx-auto">
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={onBack}
+          className="p-2 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition text-slate-600">
+          ←
+        </button>
+        <h1 className="font-display font-extrabold text-2xl text-slate-900 flex-1">Leaderboard</h1>
+        <Crown className="w-6 h-6 text-amber-400" />
+      </div>
+
+      {loading && (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-slate-400 font-mono text-sm animate-pulse">Loading…</div>
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
+          <p className="text-slate-500 text-sm">{error}</p>
+          <button onClick={onRetry}
+            className="px-6 py-2.5 rounded-xl font-display font-semibold text-sm bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 transition">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && leaderboard.length === 0 && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 text-center px-4">
+          <div className="text-4xl">🗺️</div>
+          <p className="text-slate-600 font-body text-base leading-relaxed">
+            No scores yet — be the first to make the leaderboard!
+          </p>
+          <button onClick={onPlay}
+            className="px-8 py-3.5 rounded-2xl font-display font-extrabold text-base tracking-wide transition hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              background: 'linear-gradient(135deg, #818CF8, #6366F1)',
+              color: '#FFFFFF',
+              boxShadow: '0 14px 36px -10px rgba(99, 102, 241, 0.45)',
+            }}>
+            Play now
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && leaderboard.length > 0 && (
+        <div className="flex-1 flex flex-col">
+          <div className="rounded-2xl bg-white border border-slate-100 shadow-sm overflow-hidden mb-4">
+            {leaderboard.map((row, idx) => {
+              const rank = idx + 1;
+              const isMe = row.player_id === playerId;
+              const mc   = medalColor(rank);
+              return (
+                <div key={row.player_id}
+                  className={`flex items-center gap-3 px-4 py-3 border-b last:border-b-0 border-slate-50 transition ${
+                    isMe ? 'bg-indigo-50/70' : 'hover:bg-slate-50/60'
+                  }`}>
+                  <span className="w-6 text-center font-display font-bold text-sm"
+                    style={{ color: mc ?? '#94A3B8' }}>
+                    {rank <= 3 ? ['🥇','🥈','🥉'][rank - 1] : rank}
+                  </span>
+                  <span className={`flex-1 font-body text-sm truncate ${isMe ? 'font-bold text-indigo-700' : 'text-slate-700'}`}>
+                    {row.username}{isMe ? ' (you)' : ''}
+                  </span>
+                  <span className="font-display font-bold text-sm text-slate-800 tabular-nums">
+                    {Number(row.score).toLocaleString()}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400 w-16 text-right hidden sm:block">
+                    {timeAgo(row.created_at)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {playerRank != null && playerRank > 50 && (
+            <div className="rounded-2xl bg-indigo-50 border border-indigo-100 shadow-sm px-4 py-3 mb-4 flex items-center gap-3">
+              <span className="font-display font-bold text-indigo-600 text-sm">Your rank: #{playerRank}</span>
+              <span className="text-xs text-indigo-400 flex-1 text-right">Keep playing to climb!</span>
+            </div>
+          )}
+
+          {playerRank == null && (
+            <div className="text-center text-xs text-slate-400 font-mono mb-4">Not yet ranked — play a round!</div>
+          )}
+
+          <button onClick={onPlay}
+            className="w-full py-3.5 rounded-2xl font-display font-extrabold text-base tracking-wide transition hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              background: 'linear-gradient(135deg, #818CF8, #6366F1)',
+              color: '#FFFFFF',
+              boxShadow: '0 14px 36px -10px rgba(99, 102, 241, 0.45)',
+            }}>
+            <span className="flex items-center justify-center gap-2">
+              <Play className="w-5 h-5 fill-current" /> Play now
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
