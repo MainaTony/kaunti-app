@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Volume2, VolumeX, Flame, RotateCcw, Play, Crown, Award, Pencil } from 'lucide-react';
+import { Volume2, VolumeX, Flame, RotateCcw, Play, Crown, Award, Pencil, Lightbulb, Clock } from 'lucide-react';
 import { supabase } from './supabase';
+import { COUNTY_FACTS } from './countyFacts';
 
 // ════════════════════════════════════════════════════════════════════════════
 // DATA — 47 Kenya counties, real geographic boundaries.
@@ -69,6 +70,14 @@ const GAME_MODES = [
 ];
 
 const TOTAL_QUESTIONS = 15;
+const INACTIVITY_TIMEOUT_MS = 4 * 60 * 1000; // 4 minutes
+const WARNING_DURATION_MS   = 30 * 1000;      // 30-second warning before auto-return
+
+const clearAllInactivityTimers = ({ inactivityTimerRef, warningTimerRef, countdownIntervalRef }) => {
+  clearTimeout(inactivityTimerRef.current);
+  clearTimeout(warningTimerRef.current);
+  clearInterval(countdownIntervalRef.current);
+};
 
 const PRAISE = ['Sharp!', 'Excellent!', 'County Master!', 'Unstoppable!', 'Brilliant!', 'Spot on!', 'Sasa hivi!', 'Poa sana!', 'Geography genius!', 'On fire!'];
 const ENCOURAGE = ['Almost!', 'Good try!', "You'll get the next one!", 'So close!', 'Keep going!', 'Shake it off!', 'Next one is yours!'];
@@ -419,6 +428,10 @@ export default function App() {
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [confettiKey, setConfettiKey] = useState(0);
   const [pointsPopup, setPointsPopup] = useState(null);
+  // Hint system
+  const [hintAvailable, setHintAvailable] = useState(false);
+  const [hintShown,     setHintShown]     = useState(false);
+  const [currentHint,   setCurrentHint]   = useState('');
 
   // Player identity
   const [playerId, setPlayerId]                   = useState('');
@@ -434,10 +447,22 @@ export default function App() {
   const [leaderboardError, setLeaderboardError]   = useState(null);
   const [playerRank, setPlayerRank]               = useState(undefined); // undefined=loading, null=unranked, number
 
-  const recentRef = useRef([]);
-  const timerRef = useRef(null);
+  // Inactivity system
+  const [showInactivityWarning, setShowInactivityWarning] = useState(false);
+  const [warningSecondsLeft,    setWarningSecondsLeft]    = useState(30);
 
-  useEffect(() => () => clearTimeout(timerRef.current), []);
+  const recentRef            = useRef([]);
+  const timerRef             = useRef(null);
+  const hintTimerRef         = useRef(null);
+  const inactivityTimerRef   = useRef(null);
+  const warningTimerRef      = useRef(null);
+  const countdownIntervalRef = useRef(null);
+
+  useEffect(() => () => {
+    clearTimeout(timerRef.current);
+    clearTimeout(hintTimerRef.current);
+    clearAllInactivityTimers({ inactivityTimerRef, warningTimerRef, countdownIntervalRef });
+  }, []);
 
   // Initialise player identity and personal stats on first mount
   useEffect(() => {
@@ -477,6 +502,65 @@ export default function App() {
     if (screen === 'leaderboard') fetchLeaderboard();
   }, [screen, fetchLeaderboard]);
 
+  // Inactivity — abandon round and return to start. Clears all timers and resets game state.
+  // Stable ref ([] deps) so it can be captured safely inside resetInactivityTimer's setTimeout.
+  const returnToStartFromInactivity = useCallback(() => {
+    clearAllInactivityTimers({ inactivityTimerRef, warningTimerRef, countdownIntervalRef });
+    clearTimeout(timerRef.current);
+    clearTimeout(hintTimerRef.current);
+    setShowInactivityWarning(false);
+    setScreen('start');
+    setTarget(null);
+    setStatus('asking');
+    setHistory([]);
+    setScore(0);
+    setStreak(0);
+    setBestStreak(0);
+    setCorrectCount(0);
+    setQuestionIdx(0);
+  }, []);
+
+  // Resets (or starts) the 4-minute inactivity clock. Recreated whenever screen changes so
+  // the event listeners always capture the current screen value.
+  const resetInactivityTimer = useCallback(() => {
+    if (screen !== 'playing' && screen !== 'end') return;
+    clearAllInactivityTimers({ inactivityTimerRef, warningTimerRef, countdownIntervalRef });
+    setShowInactivityWarning(false);
+    setWarningSecondsLeft(30);
+    if (screen === 'end') {
+      // End screen: no warning, just silently return after 4 minutes
+      inactivityTimerRef.current = setTimeout(() => returnToStartFromInactivity(), INACTIVITY_TIMEOUT_MS);
+      return;
+    }
+    // Playing screen: show a 30-second warning modal before returning
+    inactivityTimerRef.current = setTimeout(() => {
+      setShowInactivityWarning(true);
+      setWarningSecondsLeft(30);
+      countdownIntervalRef.current = setInterval(() => {
+        setWarningSecondsLeft(s => s - 1);
+      }, 1000);
+      warningTimerRef.current = setTimeout(() => returnToStartFromInactivity(), WARNING_DURATION_MS);
+    }, INACTIVITY_TIMEOUT_MS);
+  }, [screen, returnToStartFromInactivity]);
+
+  // Attach activity listeners; re-runs whenever screen (or resetInactivityTimer) changes
+  // so the listeners always hold the up-to-date function reference.
+  useEffect(() => {
+    const handleVisibility = () => { if (document.visibilityState === 'visible') resetInactivityTimer(); };
+    window.addEventListener('mousedown',   resetInactivityTimer);
+    window.addEventListener('keydown',     resetInactivityTimer);
+    window.addEventListener('touchstart',  resetInactivityTimer);
+    document.addEventListener('visibilitychange', handleVisibility);
+    resetInactivityTimer(); // arm the timer for the current screen on mount/screen change
+    return () => {
+      window.removeEventListener('mousedown',   resetInactivityTimer);
+      window.removeEventListener('keydown',     resetInactivityTimer);
+      window.removeEventListener('touchstart',  resetInactivityTimer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearAllInactivityTimers({ inactivityTimerRef, warningTimerRef, countdownIntervalRef });
+    };
+  }, [screen, resetInactivityTimer]);
+
   const pickQuestion = useCallback(() => {
     const available = COUNTIES.filter(c => !recentRef.current.includes(c.name));
     const pool = available.length > 0 ? available : COUNTIES;
@@ -508,6 +592,14 @@ export default function App() {
     setFeedbackMsg('');
     setPointsPopup(null);
     safePlay('whoosh');
+
+    // Hint: pick a random fact for this question and arm the 5-second timer
+    const facts = COUNTY_FACTS[t.name] || [];
+    setCurrentHint(facts.length > 0 ? facts[Math.floor(Math.random() * facts.length)] : '');
+    setHintAvailable(false);
+    setHintShown(false);
+    clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = setTimeout(() => setHintAvailable(true), 5000);
   }, [safePlay]);
 
   const startGame = useCallback(() => {
@@ -524,6 +616,10 @@ export default function App() {
 
   const submitAnswer = useCallback(() => {
     if (!selected || status !== 'asking' || !target) return;
+    // Kill the hint timer immediately — hint must not appear during the feedback window
+    clearTimeout(hintTimerRef.current);
+    setHintAvailable(false);
+    setHintShown(false);
     const isCorrect = selected === target.name;
 
     // Compute all next values explicitly so the timeout closure captures them correctly.
@@ -667,6 +763,40 @@ export default function App() {
         />
       )}
 
+      {/* Inactivity warning modal — only during 'playing' screen */}
+      {showInactivityWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4">
+          <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6 border border-slate-100 kt-up">
+            <div className="flex flex-col items-center text-center mb-5">
+              <Clock className="w-10 h-10 text-indigo-400 mb-3" />
+              <h2 className="font-display font-extrabold text-2xl text-slate-900 mb-1">Still there?</h2>
+              <p className="text-sm text-slate-500">
+                Your round will end in{' '}
+                <span className="font-display font-bold text-indigo-600">
+                  {Math.max(0, warningSecondsLeft)}
+                </span>{' '}
+                seconds.
+              </p>
+            </div>
+            <div className="flex gap-2.5">
+              <button onClick={returnToStartFromInactivity}
+                className="flex-1 py-3 rounded-2xl font-display font-semibold text-sm bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-700 transition">
+                End round
+              </button>
+              <button onClick={resetInactivityTimer}
+                className="flex-[2] py-3 rounded-2xl font-display font-extrabold text-base tracking-wide transition hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  background: 'linear-gradient(135deg, #818CF8, #6366F1)',
+                  color: '#FFFFFF',
+                  boxShadow: '0 14px 36px -10px rgba(99, 102, 241, 0.45)',
+                }}>
+                I'm still here
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {screen === 'start' && (
         <StartScreen
           onStart={() => { safePlay('tick'); startGame(); }}
@@ -696,6 +826,10 @@ export default function App() {
           pointsPopup={pointsPopup}
           soundEnabled={soundEnabled}
           setSoundEnabled={setSoundEnabled}
+          hintAvailable={hintAvailable}
+          hintShown={hintShown}
+          setHintShown={setHintShown}
+          currentHint={currentHint}
         />
       )}
 
@@ -815,6 +949,7 @@ function GameScreen({
   target, options, selected, setSelected, submitAnswer,
   status, feedbackMsg, confettiKey, pointsPopup,
   soundEnabled, setSoundEnabled,
+  hintAvailable, hintShown, setHintShown, currentHint,
 }) {
   const progress = ((questionIdx + (status !== 'asking' ? 1 : 0)) / total) * 100;
 
@@ -863,6 +998,17 @@ function GameScreen({
           Which county is highlighted?
         </div>
       </div>
+
+      {/* HINT FACT CARD — shown above the map when player taps Hint */}
+      {hintShown && currentHint && (
+        <div className="mb-2 px-3.5 py-2.5 rounded-2xl border border-amber-200 bg-amber-50 shadow-sm flex items-start gap-2.5 kt-up">
+          <Lightbulb className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+          <div>
+            <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-amber-500 block mb-0.5">Did you know?</span>
+            <span className="text-sm text-amber-900 leading-snug font-body">{currentHint}</span>
+          </div>
+        </div>
+      )}
 
       {/* MAP */}
       <div className="relative flex-1 min-h-0 flex items-center justify-center my-2">
@@ -922,22 +1068,29 @@ function GameScreen({
         })}
       </div>
 
-{/* SUBMIT */}
-      {/* SUBMIT */}
-      <button onClick={submitAnswer}
-        disabled={!selected || status !== 'asking'}
-        className="mt-3 w-full py-4 rounded-2xl font-display font-extrabold text-lg tracking-wide transition disabled:cursor-not-allowed enabled:hover:scale-[1.02] active:scale-[0.98]"
-        style={{
-          background: selected && status === 'asking'
-            ? 'linear-gradient(135deg, #818CF8, #6366F1)'
-            : '#F1F5F9',
-          color: selected && status === 'asking' ? '#FFFFFF' : '#94A3B8',
-          boxShadow: selected && status === 'asking'
-            ? '0 14px 36px -10px rgba(99, 102, 241, 0.45)'
-            : 'none',
-        }}>
-        {status === 'asking' ? 'Submit Answer' : 'Loading next…'}
-      </button>
+      {/* SUBMIT + HINT row */}
+      <div className="mt-3 flex gap-2">
+        {status === 'asking' && hintAvailable && !hintShown && currentHint && (
+          <button onClick={() => setHintShown(true)}
+            className="flex items-center gap-1.5 px-4 py-4 rounded-2xl font-display font-semibold text-sm bg-white border-2 border-amber-200 text-amber-600 hover:bg-amber-50 hover:border-amber-300 transition shrink-0 shadow-sm">
+            <Lightbulb className="w-4 h-4" /> Hint
+          </button>
+        )}
+        <button onClick={submitAnswer}
+          disabled={!selected || status !== 'asking'}
+          className="flex-1 py-4 rounded-2xl font-display font-extrabold text-lg tracking-wide transition disabled:cursor-not-allowed enabled:hover:scale-[1.02] active:scale-[0.98]"
+          style={{
+            background: selected && status === 'asking'
+              ? 'linear-gradient(135deg, #818CF8, #6366F1)'
+              : '#F1F5F9',
+            color: selected && status === 'asking' ? '#FFFFFF' : '#94A3B8',
+            boxShadow: selected && status === 'asking'
+              ? '0 14px 36px -10px rgba(99, 102, 241, 0.45)'
+              : 'none',
+          }}>
+          {status === 'asking' ? 'Submit Answer' : 'Loading next…'}
+        </button>
+      </div>
     </div>
   );
 }
