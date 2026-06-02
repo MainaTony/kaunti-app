@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Volume2, VolumeX, Flame, RotateCcw, Play, Crown, Award, Pencil, Lightbulb, Clock } from 'lucide-react';
+import { Volume2, VolumeX, Flame, RotateCcw, Play, Crown, Award, Pencil, Lightbulb, Clock, X } from 'lucide-react';
 import { supabase } from './supabase';
 import { COUNTY_FACTS } from './countyFacts';
 
@@ -431,6 +431,7 @@ export default function App() {
   // Hint system
   const [hintAvailable, setHintAvailable] = useState(false);
   const [hintShown,     setHintShown]     = useState(false);
+  const [hintUsed,      setHintUsed]      = useState(false); // true once opened; X dismiss won't re-show button
   const [currentHint,   setCurrentHint]   = useState('');
 
   // Player identity
@@ -598,6 +599,7 @@ export default function App() {
     setCurrentHint(facts.length > 0 ? facts[Math.floor(Math.random() * facts.length)] : '');
     setHintAvailable(false);
     setHintShown(false);
+    setHintUsed(false);
     clearTimeout(hintTimerRef.current);
     hintTimerRef.current = setTimeout(() => setHintAvailable(true), 5000);
   }, [safePlay]);
@@ -620,6 +622,7 @@ export default function App() {
     clearTimeout(hintTimerRef.current);
     setHintAvailable(false);
     setHintShown(false);
+    setHintUsed(false);
     const isCorrect = selected === target.name;
 
     // Compute all next values explicitly so the timeout closure captures them correctly.
@@ -679,7 +682,7 @@ export default function App() {
       questionIdx, pickQuestion, safePlay, playerId, username]);
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden font-body select-none" style={{
+    <div className="fixed inset-0 flex flex-col overflow-hidden font-body select-none" style={{
       background: 'radial-gradient(ellipse 1400px 900px at 50% -5%, #EEF2FF 0%, #F0F4FF 40%, #F7F7FA 100%)',
       color: '#1C1C1E',
     }}>
@@ -828,7 +831,9 @@ export default function App() {
           setSoundEnabled={setSoundEnabled}
           hintAvailable={hintAvailable}
           hintShown={hintShown}
-          setHintShown={setHintShown}
+          hintUsed={hintUsed}
+          onHintOpen={() => { setHintShown(true); setHintUsed(true); }}
+          onHintDismiss={() => setHintShown(false)}
           currentHint={currentHint}
         />
       )}
@@ -868,8 +873,8 @@ export default function App() {
 // ════════════════════════════════════════════════════════════════════════════
 function StartScreen({ onStart, soundEnabled, setSoundEnabled, username, personalStats, onEditUsername, onLeaderboard }) {
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center px-4 py-8 max-w-2xl mx-auto">
-      <div className="absolute top-4 right-4">
+    <div className="flex-1 w-full flex flex-col items-center justify-center overflow-hidden px-4 py-4 max-w-2xl mx-auto">
+      <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
         <button onClick={() => setSoundEnabled(!soundEnabled)}
           className="p-2.5 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition text-slate-600">
           {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5 opacity-40" />}
@@ -877,42 +882,42 @@ function StartScreen({ onStart, soundEnabled, setSoundEnabled, username, persona
       </div>
 
       <div className="text-center kt-up">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-100 border border-indigo-200 mb-7">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-100 border border-indigo-200 mb-4">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
           <span className="text-[10px] font-mono uppercase tracking-[0.25em] text-indigo-500">47 counties · 1 nation</span>
         </div>
 
-        <h1 className="font-display font-extrabold leading-[0.85] mb-4 kt-glow"
-            style={{ fontSize: 'clamp(4rem, 16vw, 8.5rem)', color: '#6366F1' }}>
+        <h1 className="font-display font-extrabold leading-[0.85] mb-3 kt-glow"
+            style={{ fontSize: 'clamp(3rem, 14vw, 7rem)', color: '#6366F1' }}>
           KAUNTI
         </h1>
-        <h2 className="font-display font-bold mb-5"
-            style={{ fontSize: 'clamp(1.25rem, 4vw, 2rem)', color: '#1C1C1E' }}>
+        <h2 className="font-display font-bold mb-3"
+            style={{ fontSize: 'clamp(1rem, 3.5vw, 1.75rem)', color: '#1C1C1E' }}>
           Master Kenya's map.
         </h2>
-        <p className="text-sm sm:text-base text-slate-500 mb-10 max-w-md mx-auto leading-relaxed">
+        <p className="text-sm text-slate-500 mb-5 max-w-md mx-auto leading-relaxed">
           Fast-fire geography. Spot the highlighted county, pick the answer, stack your streak.
           Built for speed, not for school.
         </p>
       </div>
 
       <button onClick={onStart}
-        className="group relative px-12 py-5 rounded-2xl font-display font-extrabold tracking-wide overflow-hidden transition-transform hover:scale-[1.04] active:scale-95 kt-up"
+        className="group relative px-10 py-4 rounded-2xl font-display font-extrabold tracking-wide overflow-hidden transition-transform hover:scale-[1.04] active:scale-95 kt-up"
         style={{
-          fontSize: 'clamp(1.25rem, 4vw, 1.5rem)',
+          fontSize: 'clamp(1.1rem, 3.5vw, 1.4rem)',
           background: 'linear-gradient(135deg, #818CF8 0%, #6366F1 50%, #4F46E5 100%)',
           color: '#FFFFFF',
           boxShadow: '0 20px 60px -12px rgba(99, 102, 241, 0.45), inset 0 1px 0 rgba(255,255,255,0.25)',
           animationDelay: '0.15s',
         }}>
         <span className="relative z-10 flex items-center gap-3">
-          <Play className="w-6 h-6 fill-current" /> Start Quiz
+          <Play className="w-5 h-5 fill-current" /> Start Quiz
         </span>
       </button>
 
       {/* Player identity + personal stats */}
-      <div className="mt-8 w-full max-w-sm kt-up" style={{ animationDelay: '0.25s' }}>
-        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 shadow-sm mb-3">
+      <div className="mt-5 w-full max-w-sm kt-up" style={{ animationDelay: '0.25s' }}>
+        <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 shadow-sm mb-2">
           <span className="text-xs text-slate-400 font-body shrink-0">Playing as</span>
           <span className="font-display font-bold text-slate-800 text-sm truncate flex-1">{username}</span>
           <button onClick={onEditUsername} className="shrink-0 text-slate-400 hover:text-indigo-500 transition p-0.5 rounded" aria-label="Edit username">
@@ -934,7 +939,7 @@ function StartScreen({ onStart, soundEnabled, setSoundEnabled, username, persona
         <Award className="w-4 h-4" /> Leaderboard
       </button>
 
-      <div className="mt-10 text-[10px] text-slate-400 text-center font-mono tracking-wider">
+      <div className="mt-5 text-[10px] text-slate-400 text-center font-mono tracking-wider">
         v1.0 · {TOTAL_QUESTIONS} questions per round · made for Kenya
       </div>
     </div>
@@ -949,17 +954,17 @@ function GameScreen({
   target, options, selected, setSelected, submitAnswer,
   status, feedbackMsg, confettiKey, pointsPopup,
   soundEnabled, setSoundEnabled,
-  hintAvailable, hintShown, setHintShown, currentHint,
+  hintAvailable, hintShown, hintUsed, onHintOpen, onHintDismiss, currentHint,
 }) {
   const progress = ((questionIdx + (status !== 'asking' ? 1 : 0)) / total) * 100;
 
   return (
-    <div className="relative min-h-screen flex flex-col px-4 pt-3 pb-4 sm:px-6 sm:pt-4 max-w-3xl mx-auto">
+    <div className="flex-1 w-full flex flex-col overflow-hidden px-3 sm:px-4 pt-2 sm:pt-3 pb-2 sm:pb-3 max-w-3xl mx-auto">
       {/* confetti layer */}
       {confettiKey > 0 && status === 'correct' && <Confetti key={confettiKey} />}
 
       {/* TOP BAR */}
-      <div className="flex items-center justify-between gap-2 mb-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-white border border-slate-200 shadow-sm">
           <span className="text-[10px] font-mono uppercase tracking-widest text-slate-400">Q</span>
           <span className="font-display font-bold text-sm text-slate-800">
@@ -987,7 +992,7 @@ function GameScreen({
       </div>
 
       {/* PROGRESS */}
-      <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden mb-4">
+      <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden mb-2">
         <div className="h-full rounded-full transition-all duration-500"
           style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #818CF8, #6366F1, #4F46E5)' }} />
       </div>
@@ -1001,18 +1006,21 @@ function GameScreen({
 
       {/* HINT FACT CARD — shown above the map when player taps Hint */}
       {hintShown && currentHint && (
-        <div className="mb-2 px-3.5 py-2.5 rounded-2xl border border-amber-200 bg-amber-50 shadow-sm flex items-start gap-2.5 kt-up">
-          <Lightbulb className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-          <div>
+        <div className="mb-1 px-3 py-2 rounded-2xl border border-amber-200 bg-amber-50 shadow-sm flex items-start gap-2 kt-up">
+          <Lightbulb className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
             <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-amber-500 block mb-0.5">Did you know?</span>
-            <span className="text-sm text-amber-900 leading-snug font-body">{currentHint}</span>
+            <span className="text-xs text-amber-900 leading-snug font-body">{currentHint}</span>
           </div>
+          <button onClick={onHintDismiss} className="shrink-0 text-amber-400 hover:text-amber-600 transition p-0.5 mt-0.5" aria-label="Dismiss hint">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
       {/* MAP */}
-      <div className="relative flex-1 min-h-0 flex items-center justify-center my-2">
-        <div className="relative w-full max-w-md mx-auto" style={{ aspectRatio: '7/9' }}>
+      <div className="relative flex-1 min-h-0 flex items-center justify-center my-1">
+        <div className="relative h-full w-full max-w-md mx-auto sm:max-h-[60vh]">
           <KenyaMap
             targetCounty={target}
             status={status}
@@ -1069,9 +1077,9 @@ function GameScreen({
       </div>
 
       {/* SUBMIT + HINT row */}
-      <div className="mt-3 flex gap-2">
-        {status === 'asking' && hintAvailable && !hintShown && currentHint && (
-          <button onClick={() => setHintShown(true)}
+      <div className="mt-2 flex gap-2">
+        {status === 'asking' && hintAvailable && !hintShown && !hintUsed && currentHint && (
+          <button onClick={onHintOpen}
             className="flex items-center gap-1.5 px-4 py-4 rounded-2xl font-display font-semibold text-sm bg-white border-2 border-amber-200 text-amber-600 hover:bg-amber-50 hover:border-amber-300 transition shrink-0 shadow-sm">
             <Lightbulb className="w-4 h-4" /> Hint
           </button>
@@ -1107,52 +1115,48 @@ function EndScreen({ score, bestStreak, correctCount, total, history, onRestart,
                      { t: 'Keep Practicing', c: '#a78bfa', sub: 'Every map master started here.' };
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center px-4 py-8 max-w-2xl mx-auto">
+    <div className="flex-1 w-full flex flex-col justify-center overflow-hidden px-4 py-3 max-w-2xl mx-auto">
       <div className="w-full kt-up">
-        <div className="text-center mb-8">
-          <Crown className="w-14 h-14 mx-auto mb-3" style={{ color: grade.c, filter: `drop-shadow(0 0 24px ${grade.c}aa)` }} />
-          <div className="text-[10px] font-mono uppercase tracking-[0.3em] text-slate-400 mb-2">Round Complete</div>
+        <div className="text-center mb-4">
+          <Crown className="w-10 h-10 mx-auto mb-2" style={{ color: grade.c, filter: `drop-shadow(0 0 20px ${grade.c}aa)` }} />
+          <div className="text-[10px] font-mono uppercase tracking-[0.3em] text-slate-400 mb-1">Round Complete</div>
           <h2 className="font-display font-extrabold mb-1"
-            style={{ fontSize: 'clamp(2.25rem, 8vw, 4rem)', color: grade.c, textShadow: `0 0 36px ${grade.c}44` }}>
+            style={{ fontSize: 'clamp(1.75rem, 7vw, 3rem)', color: grade.c, textShadow: `0 0 36px ${grade.c}44` }}>
             {grade.t}
           </h2>
           <p className="text-sm text-slate-500">{grade.sub}</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-2.5 mb-5">
+        <div className="grid grid-cols-3 gap-2 mb-3">
           <StatCard label="Score"       value={score.toLocaleString()} color="#fbbf24" />
           <StatCard label="Accuracy"    value={`${accuracy}%`}         color="#34d399" />
           <StatCard label="Best Streak" value={bestStreak}             color="#fb923c" />
         </div>
 
         {scoreSubmitStatus === 'failed' && (
-          <div className="mb-4 text-center text-xs text-rose-400 font-mono">
+          <div className="mb-2 text-center text-xs text-rose-400 font-mono">
             Score not saved — offline?
           </div>
         )}
 
-        {/* Round recap */}
-        <div className="rounded-2xl bg-white border border-slate-100 shadow-sm p-4 mb-4">
-          <div className="flex items-center justify-between mb-3">
+        {/* Round recap — horizontal strip */}
+        <div className="rounded-2xl bg-white border border-slate-100 shadow-sm px-3 py-2.5 mb-3">
+          <div className="flex items-center justify-between mb-2">
             <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-slate-400">Round Recap</div>
             <div className="text-[10px] font-mono text-slate-400">{correctCount}/{total} correct</div>
           </div>
-          <div className="grid grid-cols-5 gap-1.5">
+          <div className="flex flex-wrap gap-1">
             {history.map((h, i) => (
-              <div key={i} title={`${h.county} → guessed ${h.guess}`}
-                className={`aspect-square rounded-xl flex items-center justify-center text-sm font-mono font-bold border ${
-                  h.correct
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
-                    : 'bg-rose-50 border-rose-200 text-rose-500'
-                }`}>
+              <span key={i} title={`${h.county} → ${h.guess}`}
+                className={`text-sm font-mono font-bold leading-none ${h.correct ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {h.correct ? '✓' : '✗'}
-              </div>
+              </span>
             ))}
           </div>
         </div>
 
         <button onClick={onLeaderboard}
-          className="w-full mb-3 flex items-center justify-center gap-2 py-3 rounded-2xl font-display font-semibold text-sm bg-white border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-indigo-200 text-slate-600 hover:text-indigo-600 transition">
+          className="w-full mb-2 flex items-center justify-center gap-2 py-3 rounded-2xl font-display font-semibold text-sm bg-white border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-indigo-200 text-slate-600 hover:text-indigo-600 transition">
           <Award className="w-4 h-4" /> View Leaderboard
         </button>
 
@@ -1215,7 +1219,7 @@ function UsernameModal({ initial, onSave }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4">
-      <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6 border border-slate-100">
+      <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-4 sm:p-6 border border-slate-100">
         <h2 className="font-display font-extrabold text-2xl text-slate-900 mb-1">What's your name?</h2>
         <p className="text-sm text-slate-500 mb-6">
           Your name appears on the leaderboard.
@@ -1254,8 +1258,8 @@ function LeaderboardScreen({ playerId, onBack, onPlay, onRetry, leaderboard, loa
   const medalColor = (rank) => rank === 1 ? '#FBBF24' : rank === 2 ? '#94A3B8' : rank === 3 ? '#FB923C' : null;
 
   return (
-    <div className="relative min-h-screen flex flex-col px-4 pt-6 pb-8 max-w-2xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="flex-1 w-full flex flex-col overflow-hidden px-4 pt-4 pb-4 max-w-2xl mx-auto">
+      <div className="flex items-center gap-3 mb-4">
         <button onClick={onBack}
           className="p-2 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition text-slate-600">
           ←
@@ -1299,8 +1303,9 @@ function LeaderboardScreen({ playerId, onBack, onPlay, onRetry, leaderboard, loa
       )}
 
       {!loading && !error && leaderboard.length > 0 && (
-        <div className="flex-1 flex flex-col">
-          <div className="rounded-2xl bg-white border border-slate-100 shadow-sm overflow-hidden mb-4">
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="relative flex-1 min-h-0 mb-3">
+            <div className="h-full rounded-2xl bg-white border border-slate-100 shadow-sm overflow-y-auto">
             {leaderboard.map((row, idx) => {
               const rank = idx + 1;
               const isMe = row.player_id === playerId;
@@ -1326,6 +1331,9 @@ function LeaderboardScreen({ playerId, onBack, onPlay, onRetry, leaderboard, loa
                 </div>
               );
             })}
+            </div>
+            <div className="absolute bottom-0 inset-x-0 h-6 rounded-b-2xl pointer-events-none"
+              style={{ background: 'linear-gradient(to top, #ffffff, transparent)' }} />
           </div>
 
           {playerRank != null && playerRank > 50 && (
